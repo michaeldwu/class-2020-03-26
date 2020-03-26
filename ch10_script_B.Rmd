@@ -9,6 +9,8 @@ library(infer)
 library(gov.1005.data)
 library(broom)
 library(tidyverse)
+library(ggthemes)
+library(ggplot2)
 
 # A little trick to change the order of the levels of treatment, and make some
 # of the later prompts easier.
@@ -21,23 +23,107 @@ train <- train %>%
 
 **Prompt:**  First, calculate three things for both the treated and the controls: the average `att_start`, `att_end` and `att_chg`.  Do those numbers make sense? Presumably, there is a mathematical relationship among them that you can check. (Recall that, for each person, `att_end` minus `att_start` should equal `att_chg`.) Second (in a new code chunk), and just as we did with income, calculate the difference in means between  treated and the controls for only `att_chg`. (You will want to get those values on the same row, so that subtraction can be done.) Does the difference seem "large?" Do the numbers seems sensible?  Provide an hypothesis as to why the average `att_chg` is not zero in both groups.
 
+```{r}
+
+attitudes <- train %>%
+  group_by(treatment) %>%
+  summarise(mean_start = mean(att_start),
+            mean_end = mean(att_end),
+            mean_chg = mean(att_chg))
+
+attitudes %>%
+  pivot_wider(names_from = treatment, values_from = c(mean_chg, mean_end, mean_start)) %>%
+  mutate(difference = mean_chg_Treated - mean_chg_Control) %>%
+  select(mean_chg_Treated, mean_chg_Control, difference)
+
+```
+
 # Scene 9
 
 **Prompt:** What is the 99% confidence interval for the difference in means between the treated and the controls? Provide a Bayesian and Frequentist definition of that interval. Write them down in your Rmd! Are these results consistent with what Enos finds? Check out the paper and see! Why am I using a 99% confidence interval here? Why not 99.5% or 97%?
 
+```{r}
+train %>%
+  rep_sample_n(size = 115, replace = TRUE, reps = 1000) %>%
+  group_by(replicate, treatment) %>%
+  summarise(avg_change = mean(att_chg)) %>%
+  pivot_wider(names_from = treatment, values_from = avg_change) %>%
+  mutate(difference = Treated - Control) %>%
+  pull(difference) %>%
+  quantile(c(0.005,0.995))
+```
+
+Bayesian interpretation says that the true mean has a 99% chance of being in that interval. Frequentists would say that in 99% of the samplings, the true (but unknown) mean of the sampled group would be in the interval. Yes, this is what consistent with Enos finds, who states that "This experiment demonstrates that even very minor demographic change causes strong exclusionary reactions."
 
 # Scene 10
 
 **Prompt:** Use the language of the Rubin Causal Model and potential outcomes to describe this experiment. What are the units? What are the treatments? What are the outcomes? What is the *causal effect* we want to measure for each unit? Remind us what the *fundamental problem of causal inference* is. Write all this down in a paragraph you construct together. As always, each student needs their own paragraph. Preceptor still has `.my_cold_call()` . . .
 
+With respect to the Rubin Causal model, the units are the subjects/people and the treatments in this group was exposing them to Spanish speakers on the train and the control group was not exposed to the spanish speakers. The causal effect was aim to measure is how much our population's opinions on immigration change when they are exposed to immigrants on the train. The fundamental problem of causal inference is that we can't expose a single group to both the treatment and the control. That is, we don't know how the control group would've reacted if we exposed them to the treatment and vice versa.
+
 # Scene 11
 
 **Prompt:** You can never look at your data too much. Create a scatter plot which shows our treatment indicator on the x-axis and attitude change on the y-axis. You may want to jitter your points, but probably not in both directions. Check that the plot is consistent with the averages which you calculated in Scene 8.  If you have time, re-calculate the mean for each group and add those means as a separate layer in the plot. Why is it that there was an attitude change among the Controls? What does Enos's model assumes is the potential outcome for `att_end` for commuters for the treatment condition which they were not in? What other assumption might one make?
+
+```{r}
+attitude_mean_Treated <- train %>%
+  group_by(treatment) %>%
+  summarise(mean_start = mean(att_start),
+            mean_end = mean(att_end),
+            mean_chg = mean(att_chg)) %>%
+  pivot_wider(names_from = treatment, values_from = c(mean_chg, mean_end, mean_start)) %>%
+  mutate(difference = mean_chg_Treated - mean_chg_Control) %>%
+  select(mean_chg_Treated, mean_chg_Control, difference) %>%
+  pull(mean_chg_Treated)
+
+attitude_mean_Control <- train %>%
+  group_by(treatment) %>%
+  summarise(mean_start = mean(att_start),
+            mean_end = mean(att_end),
+            mean_chg = mean(att_chg)) %>%
+  pivot_wider(names_from = treatment, values_from = c(mean_chg, mean_end, mean_start)) %>%
+  mutate(difference = mean_chg_Treated - mean_chg_Control) %>%
+  select(mean_chg_Treated, mean_chg_Control, difference) %>%
+  pull(mean_chg_Control)
+
+ggplot(train, aes(x = treatment, y = att_chg)) +
+  geom_point() +
+  geom_jitter(width = 0.2) +
+  theme_classic() +
+  labs(
+    title = "Attitude Change on Immigration when Exposed to Spanish Speakers",
+    subtitle = "Randomly Sampled from Boston T Commuters",
+    x = "Treatment Group", y = "Attitude Change") +
+  geom_hline(yintercept = attitude_mean_Treated, color = "light blue", width = 0.1) +
+  geom_hline(yintercept = attitude_mean_Control, color = "pink", width = 0.1)  +
+  geom_text(
+    aes(y=attitude_mean_Treated + 0.6), x = 2.4, size = 3.5,
+    label = "Mean of Boot-\nstrapped Samples", color = "light blue") +
+  geom_text(
+    aes(y=attitude_mean_Control - 0.6), x = 0.65, size = 3.5,
+    label = "Original\nSample Mean", color = "pink")
+```
+
 
 # Scene 12
 
 **Prompt:** Add a fitted line to the plot. (Hint: `geom_smooth()` is easiest.) Make the line straight. Note that you will have to change how treatment is represented. Right now, it is a factor. To fit a line, you need to create a new variable, `treatment_numeric` which is 1 for Treated and 0 for Control. 
 
+
+```{r}
+train_mod <- train %>%
+  transform(treatment_numeric = as.numeric(treatment)-1)
+  
+ggplot(train_mod, aes(x = treatment_numeric, y = att_chg)) +
+  geom_point() +
+  geom_jitter(width = 0.2) +
+  geom_smooth() +
+  theme_classic() +
+  labs(
+    title = "Attitude Change on Immigration when Exposed to Spanish Speakers",
+    subtitle = "Randomly Sampled from Boston T Commuters",
+    x = "Treatment Group", y = "Attitude Change")
+```
 
 # Challenge Questions
 
